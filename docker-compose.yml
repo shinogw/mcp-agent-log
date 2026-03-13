@@ -3,10 +3,18 @@ services:
     build: .
     container_name: mcp_agent_log
     restart: unless-stopped
-    ports:
-      - "8600:8600"
+    # ポートを外部に直接公開しない（nginx経由のみ）
     volumes:
       - ./data:/app/data
 
-volumes:
-  data:
+  nginx:
+    image: nginx:alpine
+    container_name: mcp_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro
+    depends_on:
+      - mcp-agent-log

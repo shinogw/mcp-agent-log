@@ -19,54 +19,37 @@
 ```bash
 git clone https://github.com/shinogw/mcp-agent-log.git
 cd mcp-agent-log
+
+# 1. メンバーの認証情報を設定
+chmod +x setup-auth.sh
+./setup-auth.sh alice password123
+./setup-auth.sh bob  password456   # メンバーを追加する場合
+
+# 2. 起動
 docker compose up -d
 ```
 
-これだけで `http://localhost:8600` でサーバーが起動します。
+これで `http://localhost/sse`（Basic認証あり）でサーバーが起動します。
 
 ## Claude Code への登録
 
 ```bash
-# ローカルで動かしている場合
-claude mcp add agent-log --transport sse --url http://localhost:8600/sse
-
-# リモートサーバー（Basic認証あり）の場合
 claude mcp add agent-log \
   --transport sse \
-  --url http://YOUR_HOST:8600/sse \
-  --header "Authorization: Basic $(echo -n 'USER:PASSWORD' | base64)"
+  --url http://YOUR_HOST/sse \
+  --header "Authorization: Basic $(echo -n 'USERNAME:PASSWORD' | base64)"
 ```
 
-## 本番デプロイ（nginx + Basic認証）
-
-### 1. サーバーを起動
+## メンバーの追加・削除
 
 ```bash
-git clone https://github.com/shinogw/mcp-agent-log.git /opt/mcp-agent-log
-cd /opt/mcp-agent-log
-docker compose up -d
-```
+# 追加
+./setup-auth.sh carol newpassword
 
-### 2. nginx でリバースプロキシ + Basic認証を設定
+# 削除（.htpasswd を直接編集）
+sed -i '/^carol:/d' nginx/.htpasswd
 
-```bash
-# Basic認証ユーザーを作成
-htpasswd -c /etc/nginx/.htpasswd-mcp <username>
-
-# nginx設定をコピーして編集
-cp nginx/mcp.conf.example /etc/nginx/conf.d/mcp.conf
-# YOUR_DOMAIN を自分のドメインに書き換える
-
-systemctl reload nginx
-```
-
-### 3. メンバーの Claude Code に登録
-
-```bash
-claude mcp add agent-log \
-  --transport sse \
-  --url http://mcp.YOUR_DOMAIN/sse \
-  --header "Authorization: Basic $(echo -n 'USER:PASSWORD' | base64)"
+# 再起動不要（nginx が自動で読み直す）
 ```
 
 ## 利用できるツール
