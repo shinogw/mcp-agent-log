@@ -1,5 +1,6 @@
 data/
 nginx/.htpasswd
+.env
 *.db
 *.db-shm
 *.db-wal

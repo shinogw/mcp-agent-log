@@ -4,10 +4,12 @@ MCP Agent Log Server
 """
 
 import json
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+import httpx
 import uvicorn
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
@@ -21,6 +23,8 @@ app = Server("agent-log")
 _data_dir = Path(__file__).parent / "data"
 _data_dir.mkdir(exist_ok=True)
 DB_PATH = _data_dir / "agent_logs.db"
+
+DISCORD_NOTIFY_CHANNEL_WEBHOOK = os.environ.get("DISCORD_NOTIFY_WEBHOOK_URL")
 
 
 def get_conn():
@@ -56,19 +60,31 @@ def _row_to_dict(r) -> dict:
     }
 
 
+async def _post_to_discord(content: str):
+    """Discord の Webhook に通知を送る（失敗しても無視）"""
+    if not DISCORD_NOTIFY_CHANNEL_WEBHOOK:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(DISCORD_NOTIFY_CHANNEL_WEBHOOK, json={"content": content})
+    except Exception:
+        pass
+
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="log_message",
-            description="会話の要点・決定事項をログに記録する",
+            description="会話の要点・決定事項をログに記録する。notify=True でDiscordにも通知。",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "agent":   {"type": "string", "description": "エージェント名 (例: A1)"},
-                    "human":   {"type": "string", "description": "ヒューマン名 (例: HumanA)"},
-                    "content": {"type": "string", "description": "記録する内容"},
-                    "tags":    {"type": "array", "items": {"type": "string"}, "description": "タグのリスト"},
+                    "agent":   {"type": "string",  "description": "エージェント名 (例: A1)"},
+                    "human":   {"type": "string",  "description": "ヒューマン名 (例: HumanA)"},
+                    "content": {"type": "string",  "description": "記録する内容"},
+                    "tags":    {"type": "array",   "items": {"type": "string"}, "description": "タグのリスト"},
+                    "notify":  {"type": "boolean", "description": "True にすると Discord にも投稿される"},
                 },
                 "required": ["agent", "human", "content"],
             },
@@ -112,20 +128,28 @@ async def list_tools() -> list[Tool]:
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     if name == "log_message":
+        agent   = arguments["agent"]
+        human   = arguments["human"]
+        content = arguments["content"]
+        tags    = arguments.get("tags", [])
+        notify  = arguments.get("notify", False)
+
         conn = get_conn()
         conn.execute(
             "INSERT INTO logs (agent, human, content, tags, created_at) VALUES (?, ?, ?, ?, ?)",
-            (
-                arguments["agent"],
-                arguments["human"],
-                arguments["content"],
-                json.dumps(arguments.get("tags", []), ensure_ascii=False),
-                datetime.now().isoformat(),
-            ),
+            (agent, human, content, json.dumps(tags, ensure_ascii=False), datetime.now().isoformat()),
         )
         conn.commit()
         conn.close()
-        result = {"status": "logged", "agent": arguments["agent"], "human": arguments["human"]}
+
+        if notify:
+            tag_str = " ".join(f"`{t}`" for t in tags) if tags else ""
+            discord_msg = f"**[{agent} → {human}]**\n{content}"
+            if tag_str:
+                discord_msg += f"\nタグ: {tag_str}"
+            await _post_to_discord(discord_msg)
+
+        result = {"status": "logged", "agent": agent, "human": human, "notified": notify}
 
     elif name == "get_recent_logs":
         conn = get_conn()

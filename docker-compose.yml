@@ -3,9 +3,20 @@ services:
     build: .
     container_name: mcp_agent_log
     restart: unless-stopped
-    # ポートを外部に直接公開しない（nginx経由のみ）
+    env_file: .env
     volumes:
       - ./data:/app/data
+
+  discord-bot:
+    build: .
+    container_name: mcp_discord_bot
+    restart: unless-stopped
+    command: python discord_bot.py
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - mcp-agent-log
 
   nginx:
     image: nginx:alpine
