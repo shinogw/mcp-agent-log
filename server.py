@@ -11,6 +11,7 @@ from pathlib import Path
 import uvicorn
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
+from mcp.types import TextContent, Tool
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.routing import Mount, Route
@@ -42,85 +43,6 @@ def init_db():
     conn.close()
 
 
-@app.tool()
-async def log_message(agent: str, human: str, content: str, tags: list[str] = []) -> dict:
-    """
-    会話の要点をログに記録する
-
-    Args:
-        agent: エージェント名 (例: "A1", "B1")
-        human: ヒューマン名 (例: "HumanA", "HumanB")
-        content: 記録する内容（決定事項・進捗・メモなど）
-        tags: タグのリスト (例: ["設計決定", "認証"])
-    """
-    conn = get_conn()
-    conn.execute(
-        "INSERT INTO logs (agent, human, content, tags, created_at) VALUES (?, ?, ?, ?, ?)",
-        (agent, human, content, json.dumps(tags, ensure_ascii=False), datetime.now().isoformat())
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "logged", "agent": agent, "human": human}
-
-
-@app.tool()
-async def get_recent_logs(n: int = 20, agent: str = None) -> list[dict]:
-    """
-    最近のログを取得する
-
-    Args:
-        n: 取得件数（デフォルト20件）
-        agent: 特定のエージェントで絞り込む（省略で全エージェント）
-    """
-    conn = get_conn()
-    if agent:
-        rows = conn.execute(
-            "SELECT * FROM logs WHERE agent = ? ORDER BY id DESC LIMIT ?",
-            (agent, n)
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM logs ORDER BY id DESC LIMIT ?",
-            (n,)
-        ).fetchall()
-    conn.close()
-    return [_row_to_dict(r) for r in rows]
-
-
-@app.tool()
-async def get_logs_by_tag(tag: str) -> list[dict]:
-    """
-    タグでログを検索する
-
-    Args:
-        tag: 検索するタグ (例: "設計決定")
-    """
-    conn = get_conn()
-    rows = conn.execute(
-        "SELECT * FROM logs WHERE tags LIKE ? ORDER BY id DESC",
-        (f'%"{tag}"%',)
-    ).fetchall()
-    conn.close()
-    return [_row_to_dict(r) for r in rows]
-
-
-@app.tool()
-async def search_logs(keyword: str) -> list[dict]:
-    """
-    キーワードでログ本文を全文検索する
-
-    Args:
-        keyword: 検索キーワード
-    """
-    conn = get_conn()
-    rows = conn.execute(
-        "SELECT * FROM logs WHERE content LIKE ? ORDER BY id DESC",
-        (f"%{keyword}%",)
-    ).fetchall()
-    conn.close()
-    return [_row_to_dict(r) for r in rows]
-
-
 def _row_to_dict(r) -> dict:
     return {
         "id": r["id"],
@@ -130,6 +52,116 @@ def _row_to_dict(r) -> dict:
         "tags": json.loads(r["tags"]),
         "created_at": r["created_at"],
     }
+
+
+@app.list_tools()
+async def list_tools() -> list[Tool]:
+    return [
+        Tool(
+            name="log_message",
+            description="会話の要点・決定事項をログに記録する",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "agent":   {"type": "string", "description": "エージェント名 (例: A1)"},
+                    "human":   {"type": "string", "description": "ヒューマン名 (例: HumanA)"},
+                    "content": {"type": "string", "description": "記録する内容"},
+                    "tags":    {"type": "array", "items": {"type": "string"}, "description": "タグのリスト"},
+                },
+                "required": ["agent", "human", "content"],
+            },
+        ),
+        Tool(
+            name="get_recent_logs",
+            description="最近のログを取得する",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "n":     {"type": "integer", "description": "取得件数（デフォルト20）"},
+                    "agent": {"type": "string",  "description": "エージェントで絞り込み（省略で全件）"},
+                },
+            },
+        ),
+        Tool(
+            name="get_logs_by_tag",
+            description="タグでログを検索する",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tag": {"type": "string", "description": "検索するタグ"},
+                },
+                "required": ["tag"],
+            },
+        ),
+        Tool(
+            name="search_logs",
+            description="キーワードでログ本文を全文検索する",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "keyword": {"type": "string", "description": "検索キーワード"},
+                },
+                "required": ["keyword"],
+            },
+        ),
+    ]
+
+
+@app.call_tool()
+async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    if name == "log_message":
+        conn = get_conn()
+        conn.execute(
+            "INSERT INTO logs (agent, human, content, tags, created_at) VALUES (?, ?, ?, ?, ?)",
+            (
+                arguments["agent"],
+                arguments["human"],
+                arguments["content"],
+                json.dumps(arguments.get("tags", []), ensure_ascii=False),
+                datetime.now().isoformat(),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        result = {"status": "logged", "agent": arguments["agent"], "human": arguments["human"]}
+
+    elif name == "get_recent_logs":
+        conn = get_conn()
+        n = arguments.get("n", 20)
+        agent = arguments.get("agent")
+        if agent:
+            rows = conn.execute(
+                "SELECT * FROM logs WHERE agent = ? ORDER BY id DESC LIMIT ?", (agent, n)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM logs ORDER BY id DESC LIMIT ?", (n,)
+            ).fetchall()
+        conn.close()
+        result = [_row_to_dict(r) for r in rows]
+
+    elif name == "get_logs_by_tag":
+        conn = get_conn()
+        rows = conn.execute(
+            "SELECT * FROM logs WHERE tags LIKE ? ORDER BY id DESC",
+            (f'%"{arguments["tag"]}"%',),
+        ).fetchall()
+        conn.close()
+        result = [_row_to_dict(r) for r in rows]
+
+    elif name == "search_logs":
+        conn = get_conn()
+        rows = conn.execute(
+            "SELECT * FROM logs WHERE content LIKE ? ORDER BY id DESC",
+            (f'%{arguments["keyword"]}%',),
+        ).fetchall()
+        conn.close()
+        result = [_row_to_dict(r) for r in rows]
+
+    else:
+        result = {"error": f"Unknown tool: {name}"}
+
+    return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
 
 
 def create_starlette_app(mcp_server: Server) -> Starlette:
