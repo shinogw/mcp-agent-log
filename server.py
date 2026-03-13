@@ -144,7 +144,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         if notify:
             tag_str = " ".join(f"`{t}`" for t in tags) if tags else ""
-            discord_msg = f"**[{agent} → {human}]**\n{content}"
+            discord_msg = f"@here **[{agent} → {human}]**\n{content}"
             if tag_str:
                 discord_msg += f"\nタグ: {tag_str}"
             await _post_to_discord(discord_msg)
