@@ -45,8 +45,8 @@ intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
 
-# メッセージキュー（逐次処理用）
-_queue: asyncio.Queue = asyncio.Queue()
+# メッセージキュー（on_ready で初期化）
+_queue = None  # type: asyncio.Queue
 
 
 async def run_claude(prompt: str) -> str:
@@ -119,11 +119,12 @@ async def worker():
 
 @client.event
 async def on_ready():
+    global _queue
+    _queue = asyncio.Queue()  # イベントループ確立後に初期化
     print(f"[local_agent] Bot ready: {client.user}")
     print(f"  監視チャンネル: {AGENT_CHANNEL_ID}")
     print(f"  作業ディレクトリ: {WORK_DIR}")
     print(f"  許可ツール: {CLAUDE_TOOLS}")
-    # バックグラウンドワーカー起動
     asyncio.create_task(worker())
 
 
@@ -142,6 +143,8 @@ async def on_message(message: discord.Message):
 
     # キューに積む（受信確認リアクション）
     await message.add_reaction("⚙️")
+    if _queue is None:
+        return
     queue_pos = _queue.qsize() + 1
     if queue_pos > 1:
         await post_to_webhook(f"*{user}さんのメッセージを受信（{queue_pos}番目に待機中）*")
