@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY pyproject.toml .
 COPY server.py .
+COPY discord_bot.py .
 
 RUN pip install --no-cache-dir -e .
 
