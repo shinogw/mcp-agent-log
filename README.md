@@ -7,76 +7,85 @@ Claude Codeなど複数のエージェントが同じプロジェクトで協業
 ## アーキテクチャ
 
 ```
-[Agent A1] ──write──> [MCP Log Server] <──read── [Agent B1]
-[Agent B1] ──write──> [MCP Log Server] <──read── [Agent A1]
-                              │
-                         [SQLite DB]
-                              │
-                     Human が閲覧・検索
+[Agent A1] ──HTTP/SSE──> [MCP Log Server on VPS] <──HTTP/SSE── [Agent B1]
+                                    │
+                               agent_logs.db
+                              （VPS上に1つだけ）
+                                    │
+                          Human が閲覧・検索（全員）
 ```
 
-## インストール
+- **コード**: GitHub（パブリック）で管理
+- **ログDB**: VPS上でプライベート管理（コラボレーターのみアクセス可）
+
+## 利用できるツール
+
+| ツール | 説明 |
+|---|---|
+| `log_message` | 会話の要点・決定事項を記録する |
+| `get_recent_logs` | 最近のログを取得する（エージェント絞り込み可） |
+| `get_logs_by_tag` | タグでログを検索する |
+| `search_logs` | キーワードで全文検索する |
+
+## VPSへのデプロイ（サーバー管理者向け）
 
 ```bash
-git clone https://github.com/shinogw/mcp-agent-log.git
-cd mcp-agent-log
-pip install -e .
+# 1. clone & セットアップ
+git clone https://github.com/shinogw/mcp-agent-log.git /opt/mcp-agent-log
+cd /opt/mcp-agent-log
+python3 -m venv .venv
+.venv/bin/pip install -e .
+
+# 2. systemd サービス登録
+cp mcp-agent-log.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now mcp-agent-log
+
+# 3. nginx Basic認証ユーザー追加
+htpasswd -c /etc/nginx/.htpasswd-mcp <username>
 ```
 
-## Claude Code への登録
+### nginx 設定（抜粋）
 
-`.claude/mcp.json` または `~/.claude/claude_desktop_config.json` に追加:
+```nginx
+location /mcp/ {
+    auth_basic "MCP Agent Log";
+    auth_basic_user_file /etc/nginx/.htpasswd-mcp;
+
+    proxy_pass http://127.0.0.1:8600/;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_buffering off;        # SSE に必須
+    proxy_cache off;
+    proxy_read_timeout 3600s;   # SSE の長時間接続を維持
+}
+```
+
+## Claude Code への登録（メンバー向け）
+
+```bash
+claude mcp add agent-log \
+  --transport sse \
+  --url https://<your-domain>/mcp/sse \
+  --header "Authorization: Basic $(echo -n '<user>:<password>' | base64)"
+```
+
+または `.claude/mcp.json` に直接記述:
 
 ```json
 {
   "mcpServers": {
     "agent-log": {
-      "command": "python3",
-      "args": ["/path/to/mcp-agent-log/server.py"]
+      "transport": "sse",
+      "url": "https://<your-domain>/mcp/sse",
+      "headers": {
+        "Authorization": "Basic <base64(user:password)>"
+      }
     }
   }
 }
 ```
-
-または Claude Code CLI から:
-
-```bash
-claude mcp add agent-log -- python3 /path/to/mcp-agent-log/server.py
-```
-
-## 利用できるツール
-
-### `log_message`
-会話の要点・決定事項をログに記録する。
-
-| 引数 | 型 | 説明 |
-|---|---|---|
-| `agent` | string | エージェント名 (例: "A1") |
-| `human` | string | ヒューマン名 (例: "HumanA") |
-| `content` | string | 記録する内容 |
-| `tags` | list[string] | タグのリスト (省略可) |
-
-### `get_recent_logs`
-最近のログを取得する。
-
-| 引数 | 型 | 説明 |
-|---|---|---|
-| `n` | int | 取得件数（デフォルト20） |
-| `agent` | string | エージェントで絞り込み（省略可） |
-
-### `get_logs_by_tag`
-タグでログを検索する。
-
-| 引数 | 型 | 説明 |
-|---|---|---|
-| `tag` | string | 検索するタグ |
-
-### `search_logs`
-キーワードでログ本文を全文検索する。
-
-| 引数 | 型 | 説明 |
-|---|---|---|
-| `keyword` | string | 検索キーワード |
 
 ## エージェントへの指示例
 
@@ -97,7 +106,9 @@ claude mcp add agent-log -- python3 /path/to/mcp-agent-log/server.py
 "search_logs で '認証' に関する過去の決定を確認してください"
 ```
 
-## ログの保存場所
+## ローカル動作確認
 
-`agent_logs.db`（SQLite）がサーバーと同じディレクトリに作成されます。
-複数マシンで共有する場合は、このファイルをNFS・S3・共有ストレージに置くか、サーバーを1台のマシンで稼働させてネットワーク越しにアクセスしてください。
+```bash
+pip install -e .
+python server.py --host 127.0.0.1 --port 8600
+```

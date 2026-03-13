@@ -1,0 +1,14 @@
+[Unit]
+Description=MCP Agent Log Server
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/opt/mcp-agent-log
+ExecStart=/opt/mcp-agent-log/.venv/bin/python server.py --host 127.0.0.1 --port 8600
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
