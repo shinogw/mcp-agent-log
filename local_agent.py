@@ -45,6 +45,9 @@ intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
 
+# メッセージキュー（逐次処理用）
+_queue: asyncio.Queue = asyncio.Queue()
+
 
 async def run_claude(prompt: str) -> str:
     """claude -p をサブプロセスで非同期実行して結果を返す"""
@@ -91,12 +94,37 @@ async def post_to_webhook(content: str):
             })
 
 
+async def worker():
+    """キューからメッセージを1件ずつ取り出して逐次処理する"""
+    while True:
+        message, user, content = await _queue.get()
+        try:
+            print(f"[local_agent] 処理開始 [{user}]: {content[:100]}")
+            queue_size = _queue.qsize()
+            if queue_size > 0:
+                await post_to_webhook(f"*（{queue_size}件待機中）*")
+
+            prompt = f"[{user}からの指示]:\n{content}"
+            reply  = await run_claude(prompt)
+
+            await message.add_reaction("✅")
+            await message.remove_reaction("⚙️", client.user)
+            await post_to_webhook(f"**[{user}への返答]**\n{reply}")
+        except Exception as e:
+            print(f"[local_agent] エラー: {e}")
+            await post_to_webhook(f"エラーが発生しました: {e}")
+        finally:
+            _queue.task_done()
+
+
 @client.event
 async def on_ready():
     print(f"[local_agent] Bot ready: {client.user}")
     print(f"  監視チャンネル: {AGENT_CHANNEL_ID}")
     print(f"  作業ディレクトリ: {WORK_DIR}")
     print(f"  許可ツール: {CLAUDE_TOOLS}")
+    # バックグラウンドワーカー起動
+    asyncio.create_task(worker())
 
 
 @client.event
@@ -112,21 +140,13 @@ async def on_message(message: discord.Message):
     if not content:
         return
 
-    # 受信確認リアクション
+    # キューに積む（受信確認リアクション）
     await message.add_reaction("⚙️")
-
-    print(f"[local_agent] [{user}]: {content[:100]}")
-
-    # claude -p 実行
-    prompt = f"[{user}からの指示]:\n{content}"
-    reply  = await run_claude(prompt)
-
-    # 完了リアクション
-    await message.add_reaction("✅")
-    await message.remove_reaction("⚙️", client.user)
-
-    # Webhook で返信
-    await post_to_webhook(reply)
+    queue_pos = _queue.qsize() + 1
+    if queue_pos > 1:
+        await post_to_webhook(f"*{user}さんのメッセージを受信（{queue_pos}番目に待機中）*")
+    print(f"[local_agent] キュー追加 [{user}] (待機:{queue_pos}件)")
+    await _queue.put((message, user, content))
 
 
 if __name__ == "__main__":
