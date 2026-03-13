@@ -1,0 +1,12 @@
+services:
+  mcp-agent-log:
+    build: .
+    container_name: mcp_agent_log
+    restart: unless-stopped
+    ports:
+      - "8600:8600"
+    volumes:
+      - ./data:/app/data
+
+volumes:
+  data:

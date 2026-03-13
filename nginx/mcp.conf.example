@@ -1,0 +1,47 @@
+# MCP Agent Log Server — nginx リバースプロキシ設定サンプル
+#
+# 使い方:
+#   1. このファイルを /etc/nginx/conf.d/mcp.conf としてコピー
+#   2. YOUR_DOMAIN を自分のドメインに変更
+#   3. Basic認証ユーザーを作成: htpasswd -c /etc/nginx/.htpasswd-mcp <username>
+#   4. nginx を再起動: systemctl reload nginx
+
+server {
+    listen 80;
+    server_name YOUR_DOMAIN;  # 例: mcp.example.com
+
+    location / {
+        auth_basic           "MCP Agent Log";
+        auth_basic_user_file /etc/nginx/.htpasswd-mcp;
+
+        proxy_pass         http://127.0.0.1:8600/;
+        proxy_http_version 1.1;
+        proxy_set_header   Connection "";
+        proxy_set_header   Host $host;
+        proxy_buffering    off;
+        proxy_cache        off;
+        proxy_read_timeout 3600s;  # SSE の長時間接続を維持
+    }
+}
+
+# HTTPS版（SSL証明書取得後に使用）
+# server {
+#     listen 443 ssl;
+#     server_name YOUR_DOMAIN;
+#
+#     ssl_certificate     /etc/letsencrypt/live/YOUR_DOMAIN/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/YOUR_DOMAIN/privkey.pem;
+#
+#     location / {
+#         auth_basic           "MCP Agent Log";
+#         auth_basic_user_file /etc/nginx/.htpasswd-mcp;
+#
+#         proxy_pass         http://127.0.0.1:8600/;
+#         proxy_http_version 1.1;
+#         proxy_set_header   Connection "";
+#         proxy_set_header   Host $host;
+#         proxy_buffering    off;
+#         proxy_cache        off;
+#         proxy_read_timeout 3600s;
+#     }
+# }

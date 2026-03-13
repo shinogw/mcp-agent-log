@@ -18,7 +18,9 @@ from starlette.routing import Mount, Route
 
 app = Server("agent-log")
 
-DB_PATH = Path(__file__).parent / "agent_logs.db"
+_data_dir = Path(__file__).parent / "data"
+_data_dir.mkdir(exist_ok=True)
+DB_PATH = _data_dir / "agent_logs.db"
 
 
 def get_conn():
