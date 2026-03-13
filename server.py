@@ -58,6 +58,19 @@ def init_db():
         conn.execute("ALTER TABLE logs ADD COLUMN channel_id INTEGER")
     except sqlite3.OperationalError:
         pass
+
+    # .env に DISCORD_LOG_CHANNEL_ID / DISCORD_NOTIFY_WEBHOOK_URL があれば自動登録
+    channel_id_env  = os.environ.get("DISCORD_LOG_CHANNEL_ID")
+    webhook_url_env = os.environ.get("DISCORD_NOTIFY_WEBHOOK_URL")
+    if channel_id_env and webhook_url_env:
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO channels (channel_id, webhook_url, name, created_at) VALUES (?, ?, ?, ?)",
+                (int(channel_id_env), webhook_url_env, "default", datetime.now().isoformat()),
+            )
+        except Exception:
+            pass
+
     conn.commit()
     conn.close()
 
