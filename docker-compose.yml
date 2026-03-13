@@ -7,6 +7,8 @@ services:
     volumes:
       - ./data:/app/data
 
+  # discord-bot は local_agent.py（Mac常駐）に置き換え済み。
+  # VPS で Claude API 返信を使いたい場合は profiles: [vps-bot] を外して起動する。
   discord-bot:
     build: .
     container_name: mcp_discord_bot
@@ -17,6 +19,8 @@ services:
       - ./data:/app/data
     depends_on:
       - mcp-agent-log
+    profiles:
+      - vps-bot
 
   nginx:
     image: nginx:alpine
