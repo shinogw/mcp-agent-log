@@ -1,7 +1,6 @@
 """
 Discord Bot
-- 特定チャンネル（例: #cc-agent）のメッセージを自動でDBに記録
-- エージェントからの通知も同じチャンネルに投稿される（Webhook経由）
+- DBに登録された全チャンネルのメッセージを自動でDBに記録
 - Bot自身のメッセージは記録しない（無限ループ防止）
 - ✅ リアクションで記録完了を通知
 """
@@ -22,15 +21,23 @@ client = discord.Client(intents=intents)
 _data_dir = Path(__file__).parent / "data"
 DB_PATH = _data_dir / "agent_logs.db"
 
-# メンバーの書き込み・エージェントの通知を1つのチャンネルで行う
-LOG_CHANNEL_ID = int(os.environ["DISCORD_LOG_CHANNEL_ID"])
+
+def get_registered_channel_ids() -> set[int]:
+    """DBに登録済みのチャンネルIDセットを返す"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute("SELECT channel_id FROM channels").fetchall()
+        conn.close()
+        return {row[0] for row in rows}
+    except Exception:
+        return set()
 
 
-def save_to_db(human: str, content: str):
+def save_to_db(human: str, content: str, channel_id: int):
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
-        "INSERT INTO logs (agent, human, content, tags, created_at) VALUES (?, ?, ?, ?, ?)",
-        ("discord", human, content, json.dumps(["discord"]), datetime.now().isoformat()),
+        "INSERT INTO logs (agent, human, content, tags, channel_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        ("discord", human, content, json.dumps(["discord"]), channel_id, datetime.now().isoformat()),
     )
     conn.commit()
     conn.close()
@@ -39,6 +46,8 @@ def save_to_db(human: str, content: str):
 @client.event
 async def on_ready():
     print(f"Discord Bot ready: {client.user}")
+    channel_ids = get_registered_channel_ids()
+    print(f"監視中のチャンネル: {channel_ids if channel_ids else '(未登録)'}")
 
 
 @client.event
@@ -47,11 +56,12 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # 記録対象チャンネルのみ処理
-    if message.channel.id != LOG_CHANNEL_ID:
+    # DBに登録済みのチャンネルのみ処理
+    registered = get_registered_channel_ids()
+    if message.channel.id not in registered:
         return
 
-    save_to_db(message.author.display_name, message.content)
+    save_to_db(message.author.display_name, message.content, message.channel.id)
 
     # ✅ リアクションで記録完了を通知
     await message.add_reaction("✅")
